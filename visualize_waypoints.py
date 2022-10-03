@@ -1,10 +1,16 @@
 import os
-from src.data import FloorPlan
+from src.data import FloorPlan, RootDirectory
 
 if __name__ == '__main__':
     data_directory = os.path.join(os.getcwd(), 'data')
-
-    floorplan = FloorPlan(1, 'B1', data_directory)
-    floorplan.plot_trajectory('lines + markers')
-    floorplan.show()
-    floorplan.figure.write_image(floorplan.directory + '/fig1.jpeg')
+    output_directory = os.path.join(os.getcwd(), 'output')
+    rd = RootDirectory()
+    available_data = rd._AVAILABLE_DATA
+    for k, v in available_data.items():
+        for floor in v:
+            site_num = int(k[-1])
+            floorplan = FloorPlan(site_num, floor, data_directory)
+            floorplan.plot_trajectory('lines + markers')
+            floorplan.show()
+            path = os.path.join(output_directory, '_'.join([k, floor])+'.jpeg')
+            floorplan.figure.write_image(path)

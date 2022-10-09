@@ -259,8 +259,82 @@ class FloorPlan(RootDirectory):
 
                 wifi_rssi[bssid] = position_rssi
         return wifi_rssi
-    
 
+    def plot_ibeacon_heatmap(self, title='dBm'):
+        ibeacon_rssi = self.extract_ibeacon_rssi()
+        print(f'This floor has {len(ibeacon_rssi.keys())} ibeacons')
+        ten_ibeacon_ummids = list(ibeacon_rssi.keys())[0:10]
+        print('Example 10 ibeacon UUID_MajorID_MinorIDs:\n')
+        for ummid in ten_ibeacon_ummids:
+            print(ummid)
+        target_ibeacon = input(f"Please input target ibeacon UUID_MajorID_MinorID:\n")
+        # target_ibeacon = 'FDA50693-A4E2-4FB1-AFCF-C6EB07647825_10073_61418'
+        heat_positions = np.array(list(ibeacon_rssi[target_ibeacon].keys()))
+        heat_values = np.array(list(ibeacon_rssi[target_ibeacon].values()))[:, 0]
+
+        # add heatmap
+        self.figure.add_trace(
+            go.Scatter(x=heat_positions[:, 0],
+                       y=heat_positions[:, 1],
+                       mode='markers',
+                       marker=dict(size=7,
+                                   color=heat_values,
+                                   colorbar=dict(title=title),
+                                   colorscale="Rainbow"),
+                       text=heat_values,
+                       name=title))
+
+    def extract_ibeacon_rssi(self):
+        ibeacon_mwi_datas = {}
+        paths = self.filepaths_by_site_and_floor(int(self.site[-1]), self.floor)
+        datafiles = [DataFile(path) for path in paths]
+        for file in datafiles:
+            file.load()
+            data = file.parse()
+            compute = Compute()
+            step_positions = compute.compute_step_positions(data.acce, data.ahrs, data.waypoint)
+
+            ibeacon_datas = data.ibeacon
+
+            if ibeacon_datas.size != 0:
+                sep_tss = np.unique(ibeacon_datas[:, 0].astype(float))
+                ibeacon_datas_list = compute.split_ts_seq(ibeacon_datas, sep_tss)
+                for ibeacon_ds in ibeacon_datas_list:
+                    diff = np.abs(step_positions[:, 0] - float(ibeacon_ds[0, 0]))
+                    index = np.argmin(diff)
+                    target_xy_key = tuple(step_positions[index, 1:3])
+                    if target_xy_key in ibeacon_mwi_datas:
+                        ibeacon_mwi_datas[target_xy_key]['ibeacon'] = np.append(ibeacon_mwi_datas[target_xy_key]['ibeacon'],
+                                                                                ibeacon_ds, axis=0)
+                    else:
+                        ibeacon_mwi_datas[target_xy_key] = {
+                            'ibeacon': ibeacon_ds
+                        }
+
+        ibeacon_rssi = {}
+        for position_key in ibeacon_mwi_datas:
+            # print(f'Position: {position_key}')
+
+            ibeacon_data = ibeacon_mwi_datas[position_key]['ibeacon']
+            for ibeacon_d in ibeacon_data:
+                ummid = ibeacon_d[1]
+                rssi = int(ibeacon_d[2])
+
+                if ummid in ibeacon_rssi:
+                    position_rssi = ibeacon_rssi[ummid]
+                    if position_key in position_rssi:
+                        old_rssi = position_rssi[position_key][0]
+                        old_count = position_rssi[position_key][1]
+                        position_rssi[position_key][0] = (old_rssi * old_count + rssi) / (old_count + 1)
+                        position_rssi[position_key][1] = old_count + 1
+                    else:
+                        position_rssi[position_key] = np.array([rssi, 1])
+                else:
+                    position_rssi = {}
+                    position_rssi[position_key] = np.array([rssi, 1])
+
+                ibeacon_rssi[ummid] = position_rssi
+        return ibeacon_rssi
 
 @dataclass
 class ReadData:

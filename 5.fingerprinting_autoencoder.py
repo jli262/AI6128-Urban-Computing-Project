@@ -1,7 +1,7 @@
 import numpy as np
 
 from src.data import RootDirectory, FloorPlan
-from src.model import FingerprintModel
+from src.model_autoencoder import FingerprintModel
 
 AUGMENT_DATA = True
 TEST_SIZE = 0.25

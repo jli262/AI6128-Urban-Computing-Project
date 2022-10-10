@@ -191,6 +191,94 @@ class FloorPlan(RootDirectory):
                     name='trajectory',
                 ))
 
+    def plot_magnetic(self, colorbar_title='dBm'): # Plot magnetic heatmap
+        mwi_datas = self.calibrate_magnetic_wifi_ibeacon_to_position() # Calculate mwi_datas
+        magnetic_strength = self.extract_magnetic_strength(mwi_datas) # Calculate magnetic_strength
+
+        heat_positions = np.array(list(magnetic_strength.keys())) # Convert magnetic strength (K) into heat positions information
+        heat_values = np.array(list(magnetic_strength.values())) #  Convert magnetic strength (Value) into heat values information
+        self.figure.add_trace( # Plot heat maps
+            go.Scatter(x=heat_positions[:, 0],
+                       y=heat_positions[:, 1],
+                       mode='markers',
+                       marker=dict(size=7,
+                                   color=heat_values,
+                                   colorbar=dict(title=colorbar_title),
+                                   colorscale="Rainbow"),
+                       text=heat_values,
+                       name=colorbar_title))
+        pass
+
+    def calibrate_magnetic_wifi_ibeacon_to_position(self): # Calculate mwi_datas
+        mwi_datas = {}
+        paths = self.filepaths_by_site_and_floor(int(self.site[-1]), self.floor) # Path call location information Site string last character
+        datafiles = [DataFile(path) for path in paths]
+        compute = Compute()
+        for file in datafiles:
+            file.load() # Load data
+            data = file.parse() # Parse data
+            step_positions = compute.compute_step_positions(data.acce, data.ahrs, data.waypoint)
+            wifi_datas = data.wifi
+            if wifi_datas.size != 0:
+                sep_tss = np.unique(wifi_datas[:, 0].astype(float))
+                wifi_datas_list = compute.split_ts_seq(wifi_datas, sep_tss)
+                for wifi_ds in wifi_datas_list:
+                    diff = np.abs(step_positions[:, 0] - float(wifi_ds[0, 0]))
+                    index = np.argmin(diff)
+                    target_xy_key = tuple(step_positions[index, 1:3])
+                    if target_xy_key in mwi_datas:
+                        mwi_datas[target_xy_key]['wifi'] = np.append(mwi_datas[target_xy_key]['wifi'],
+                                                                     wifi_ds, axis=0)
+                    else:
+                        mwi_datas[target_xy_key] = {
+                            'magnetic': np.zeros((0, 4)),
+                            'wifi': wifi_ds,
+                            'ibeacon': np.zeros((0, 3))
+                        }
+            ibeacon_datas = data.ibeacon
+            if ibeacon_datas.size != 0:
+                sep_tss = np.unique(ibeacon_datas[:, 0].astype(float))
+                ibeacon_datas_list = compute.split_ts_seq(ibeacon_datas, sep_tss)
+                for ibeacon_ds in ibeacon_datas_list:
+                    diff = np.abs(step_positions[:, 0] - float(ibeacon_ds[0, 0]))
+                    index = np.argmin(diff)
+                    target_xy_key = tuple(step_positions[index, 1:3])
+                    if target_xy_key in mwi_datas:
+                        mwi_datas[target_xy_key]['ibeacon'] = np.append(mwi_datas[target_xy_key]['ibeacon'], ibeacon_ds,
+                                                                        axis=0)
+                    else:
+                        mwi_datas[target_xy_key] = {
+                            'magnetic': np.zeros((0, 4)),
+                            'wifi': np.zeros((0, 5)),
+                            'ibeacon': ibeacon_ds
+                        }
+
+            magn_datas = data.magn
+            sep_tss = np.unique(magn_datas[:, 0].astype(float))
+            magn_datas_list = compute.split_ts_seq(magn_datas, sep_tss)
+            for magn_ds in magn_datas_list:
+                diff = np.abs(step_positions[:, 0] - float(magn_ds[0, 0]))
+                index = np.argmin(diff)
+                target_xy_key = tuple(step_positions[index, 1:3])
+                if target_xy_key in mwi_datas:
+                    mwi_datas[target_xy_key]['magnetic'] = np.append(mwi_datas[target_xy_key]['magnetic'], magn_ds, axis=0)
+                else:
+                    mwi_datas[target_xy_key] = {
+                        'magnetic': magn_ds,
+                        'wifi': np.zeros((0, 5)),
+                        'ibeacon': np.zeros((0, 3))
+                    }
+        return mwi_datas
+
+    def extract_magnetic_strength(self, mwi_datas):
+        magnetic_strength = {} # key,value
+        for position_key in mwi_datas:
+            # print(f'Position: {position_key}')
+            magnetic_data = mwi_datas[position_key]['magnetic']
+            magnetic_s = np.mean(np.sqrt(np.sum(magnetic_data[:, 1:4] ** 2, axis=1)))
+            magnetic_strength[position_key] = magnetic_s
+        return magnetic_strength
+
     def plot_wifi_heatmap(self, colorbar_title='dBm'):
         wifi_rssi = self.extract_rssi()
         ten_wifi_bssids = random.sample(wifi_rssi.keys(), 10)

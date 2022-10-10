@@ -1,7 +1,6 @@
 import os
 import random
 import numpy as np
-from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
@@ -9,8 +8,6 @@ import json
 import plotly.graph_objs as go
 from PIL import Image
 import scipy.signal as signal
-from torch.utils.data import Dataset, DataLoader
-from sklearn.preprocessing import StandardScaler
 
 from .preprocessing import Compute
 
@@ -104,8 +101,6 @@ class FloorPlan(RootDirectory):
                             )
         self.info = dict()           
         self.figure = go.Figure()
-        self.datafiles = []
-        self.data = []
     
     def load_info(self):
         path = os.path.join(
@@ -117,144 +112,6 @@ class FloorPlan(RootDirectory):
         with open(path, 'r') as f:
             self.info = json.load(f)['map_info']
     
-    def load_data(self):
-        paths = self.filepaths_by_site_and_floor(int(self.site[-1]), self.floor)
-        self.datafiles = [DataFile(path) for path in paths]  
-        data = []
-        for file in self.datafiles:
-            file.load()
-            data.append(file.parse())
-        self.data = data
-
-    def _engineer_features(self, augment_data: bool = True):
-        if not self.data:
-            self.load_data()
-        
-        output = np.zeros((0,9))
-        for datafile in self.datafiles:
-            _ = datafile.engineer_features(augment_data)
-            output = np.append(output, _, axis=0)
-
-        return output
-
-    def get_train_test_splits(self, test_size: float = 0.25,
-                                augment_data: bool = True):
-        data = self._engineer_features(augment_data)
-        
-        # train test indices
-        pos_magn_data = data[:, 1:7].astype('float')
-        x_count_total = pos_magn_data.shape[0]
-        x_count_test = int(test_size * x_count_total)
-        x_count_train = x_count_total - x_count_test
-        idx_test = random.sample(range(x_count_total), x_count_test)
-        idx_train = list(set(range(x_count_total)).difference(idx_test))
-
-        # instantiating data structures
-        wifi_ibeacon_exists = np.zeros((0,2)).astype('float')
-        wifi_data = np.zeros((0, 0)).astype('float')
-        wifi_bssid = []
-        wifi_bssid_idx = dict()   
-        ibeacon_uid = []
-        ibeacon_uid_idx = dict()     
-        ibeacon_data = np.zeros((0, 0)).astype('float')        
-
-        # generating full dataset
-        for idx in idx_train:
-            _ = data[idx]
-
-            # insert placeholders
-            wifi_ibeacon_exists = np.concatenate((wifi_ibeacon_exists, np.zeros((1,2))), axis=0)
-            wifi_data = np.concatenate((wifi_data, np.zeros((1, wifi_data.shape[1]))), axis=0)
-            ibeacon_data = np.concatenate((ibeacon_data, np.zeros((1, ibeacon_data.shape[1]))), axis=0)
-
-            # inserting each wifi access point rssi as a feature
-            wifi_access_points = _[7]
-            if wifi_access_points:
-                wifi_ibeacon_exists[-1][0] = 1.0
-            
-            for bssid, rssi in wifi_access_points.items():
-                if bssid not in wifi_bssid_idx:
-                    wifi_bssid_idx[bssid] = len(wifi_bssid)
-                    wifi_bssid.append(bssid)
-                    wifi_data = np.concatenate((wifi_data, np.zeros((wifi_data.shape[0], 1))), axis=1)
-                wifi_data[-1][wifi_bssid_idx[bssid]] = (100 + rssi) / 100
-
-            # inserting each ibeacon access point rssi as a feature
-            ibeacon_access_points = _[8]
-            if ibeacon_access_points:
-                wifi_ibeacon_exists[-1][1] = 1.0
-            
-            for uid, rssi in ibeacon_access_points.items():
-                if uid not in ibeacon_uid_idx:
-                    ibeacon_uid_idx[uid] = len(ibeacon_uid)
-                    ibeacon_uid.append(uid)
-                    ibeacon_data = np.concatenate((ibeacon_data, np.zeros((ibeacon_data.shape[0], 1))), axis=1)
-                ibeacon_data[-1][ibeacon_uid_idx[uid]] = (100 + rssi) / 100
-            
-        for idx in idx_test:
-            _ = data[idx]
-            wifi_ibeacon_exists = np.concatenate((wifi_ibeacon_exists, np.zeros((1,2))), axis=0)
-            wifi_data = np.concatenate((wifi_data, np.zeros((1, wifi_data.shape[1]))), axis=0)
-            ibeacon_data = np.concatenate((ibeacon_data, np.zeros((1, ibeacon_data.shape[1]))), axis=0)
-
-            wifi_access_points = _[7]
-            if wifi_access_points:
-                wifi_ibeacon_exists[-1][0] = 1.0
-
-            # for test data, only check for bssid that existed in training data
-            for bssid, rssi in wifi_access_points.items():  
-                if bssid in wifi_bssid_idx:
-                    wifi_data[-1][wifi_bssid_idx[bssid]] = (100 + rssi) / 100
-                
-            ibeacon_access_points = _[8]
-            if ibeacon_access_points:
-                wifi_ibeacon_exists[-1][1] = 1.0
-            
-            for uid, rssi in ibeacon_access_points.items():
-                if uid in ibeacon_uid_idx:
-                    ibeacon_data[-1][ibeacon_uid_idx[uid]] = (100 + rssi) / 100
-
-        # train test split
-        data_train = np.concatenate((pos_magn_data[idx_train, :],
-                                        wifi_ibeacon_exists[:x_count_train, :],
-                                        wifi_data[:x_count_train, :],
-                                        ibeacon_data[:x_count_train, :]), axis=1)
-        data_test = np.concatenate((pos_magn_data[idx_test, :],
-                                        wifi_ibeacon_exists[x_count_train:, :],
-                                        wifi_data[x_count_train:, :],
-                                        ibeacon_data[x_count_train:, :]), axis=1)
-
-        # standardization of magnetic field data
-        scaler = StandardScaler()
-        data_train[:, 2:6] = scaler.fit_transform(data_train[:, 2:6].copy())
-        data_test[:, 2:6] = scaler.transform(data_test[:, 2:6].copy())        
-
-        return data_train, data_test, [wifi_bssid_idx, ibeacon_uid_idx]
-
-    def as_list(self):
-        if not self.data:
-            self.load_data()
-
-        output = {}
-        for data in self.data:
-            wp = str(data.waypoint[0]) + '_' + str(data.waypoint[1])
-            if wp in output:
-                output[wp].append([data.id_, data.acce, data.gyro, data.magn, data.ahrs, data.wifi, data.ibeacon])
-            else:
-                output[wp] = [[data.id_, data.acce, data.gyro, data.magn, data.ahrs, data.wifi, data.ibeacon]]
-        
-        output_as_list = []
-        for waypoint, v in output.items():
-            for data_point in v:
-                output_as_list.append(data_point + [waypoint])
-
-        return output_as_list
-
-    def as_dataframe(self):
-        if not self.data:
-            self.load_data()
-        
-
     def show(self):
         # add floor plan        
         title = 'Floor plan for {site} {floor}'.format(site=self.site, floor=self.floor)
@@ -567,22 +424,8 @@ class FloorPlan(RootDirectory):
                 ibeacon_rssi[ummid] = position_rssi
         return ibeacon_rssi
 
-
-class FloorData(Dataset):
-    def __init__(self, data):
-        self.features = data[:, 2:]
-        self.labels = data[:, :2]
-        self.length = data.shape[0]
-    
-    def __getitem__(self, idx):
-        return self.features[idx], self.labels[idx]
-
-    def __len__(self):
-        return self.length
-
 @dataclass
 class ReadData:
-    id_: str
     acce: np.ndarray
     acce_uncali: np.ndarray
     gyro: np.ndarray
@@ -614,15 +457,12 @@ class DataFile(object):
         self.wifi = []
         self.ibeacon = []
         self.waypoint = []
-
-        self.data = None
-        self.data_with_features = None
         
-    def load(self) -> None:
+    def load(self):
         with open(self.filepath, 'r', encoding='utf-8') as file:
             self.lines = file.readlines()
     
-    def parse(self) -> ReadData:
+    def parse(self):
         for line_data in self.lines:
             line_data = line_data.strip()
             if not line_data or line_data[0] == '#':
@@ -692,74 +532,8 @@ class DataFile(object):
         self.ibeacon = np.array(self.ibeacon)
         self.waypoint = np.array(self.waypoint)
 
-        self.data = ReadData(self.path_id, self.acce, self.acce_uncali, self.gyro, self.gyro_uncali, self.magn, self.magn_uncali, self.ahrs, self.wifi, self.ibeacon, self.waypoint)
-        return self.data
+        return ReadData(self.acce, self.acce_uncali, self.gyro, self.gyro_uncali, self.magn, self.magn_uncali, self.ahrs, self.wifi, self.ibeacon, self.waypoint)
 
-    def engineer_features(self, augment_data: bool) -> List:
-        """
-            returned format [(time, POSx, POSy, magnX, magnY, magnZ, magnIntense, {'BSSID4':rssi, 'BSSID7':rssi,..}, {'UUID2':rssi, 'UUID7':rssi,..}),...]
-        """
-        if augment_data:
-            augmented_data = Compute().compute_step_positions(self.data.acce, self.data.ahrs, self.data.waypoint) # computing steps using sample codes
-        else:
-            augmented_data = self.data.waypoint
-
-        # data_index is of the following structure: List[List[Tuple[float, float, float]], Dict, Dict]
-        data_index = [{'magn':[], 'wifi':defaultdict(list), 'ibeacon':defaultdict(list)} for _ in range(len(augmented_data))]
-        data_timestamp = augmented_data[:,0]
-
-        # assigning magnetic field data to waypoint with closest timestamp        
-        for magn_data in self.data.magn:
-            time_difference = abs(data_timestamp - int(magn_data[0]))
-            idx = np.argmin(time_difference)            
-            data_index[idx]['magn'].append((float(magn_data[1]), float(magn_data[2]), float(magn_data[3]))) # 'magn': [(x1,y1,z1), (x2,y2,z2), ...]
-
-        # assigning all wifi access points rrsi to waypoint with closest timestamp
-        for wifi_data in self.data.wifi:
-            time_difference = abs(data_timestamp - int(wifi_data[0]))
-            idx = np.argmin(time_difference)
-            data_index[idx]['wifi'][wifi_data[2]].append(int(wifi_data[3]))
-
-        # assigning all ibeacon access points rrsi to waypoint with closest timestamp
-        for ibeacon_data in self.data.ibeacon:
-            time_difference = abs(data_timestamp - int(ibeacon_data[0]))
-            idx = np.argmin(time_difference)
-            data_index[idx]['ibeacon'][ibeacon_data[1]].append(int(ibeacon_data[2]))
-
-        # main part of feature engineering
-        # 1. mean of magnetic field across all readings associated with waypoint (3 features)
-        # 2. mean of magnitude of magnetic field using sqrt(a**2 + b**2 + c**2) across all readings associated with waypoint (1 feature)
-        # 3. mean of rssis across each wifi access points associated with waypoint (1 feature)
-        # 4. mean of rssis across each ibeacon access points associated with waypoint (1 feature)
-        output = [None] * len(augmented_data)
-        for idx in range(len(data_timestamp)):
-            t, wp_x, wp_y = augmented_data[idx]
-            output[idx] = [t, wp_x, wp_y]
-
-            magn_data, wifi_data, ibeacon_data = (np.array(data_index[idx]['magn']),
-                                                    data_index[idx]['wifi'],
-                                                    data_index[idx]['ibeacon'])
-
-            # 1. and 2. (4 features)
-            if len(magn_data) > 0:
-                avg = magn_data.mean(axis=0)
-                magnitude = float(np.mean(np.sqrt(np.sum(magn_data**2, axis=1))))
-                output[idx].extend(list(avg) + [magnitude])
-            else:
-                output[idx].extend([0.0, 0.0, 0.0, 0.0])
-
-            # 3.
-            output[idx].append(defaultdict(lambda: -100))
-            for bssid, rssis in wifi_data.items():
-                output[idx][-1][bssid] = sum(rssis) / len(rssis)
-            
-            # 4.
-            output[idx].append(defaultdict(lambda: -100))
-            for uuid, rssis in ibeacon_data.items():
-                output[idx][-1][uuid] = sum(rssis) / len(rssis)
-        
-        self.data_with_features = output
-        return self.data_with_features
 
 class Sensor(object):
     def __init__(self):
@@ -776,4 +550,4 @@ class Gyroscope(Sensor):
 class Magnetometer(Sensor):
     def __init__(self):
         pass
-
+    

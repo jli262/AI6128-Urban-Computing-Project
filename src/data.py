@@ -422,29 +422,91 @@ class FloorPlan(RootDirectory):
             magnetic_strength[position_key] = magnetic_s
         return magnetic_strength
 
-    def plot_wifi_heatmap(self, colorbar_title='dBm'):
-        wifi_rssi = self.extract_rssi()
-        ten_wifi_bssids = random.sample(wifi_rssi.keys(), 10)
-        print('Example 10 wifi ap bssids:\n')
-        for bssid in ten_wifi_bssids:
-            print(bssid)
-        target_wifi = input(f"Please input target wifi ap bssid:\n")
-        heat_positions = np.array(list(wifi_rssi[target_wifi].keys()))
-        print(len(heat_positions))
-        heat_values = np.array(list(wifi_rssi[target_wifi].values()))[:, 0]
-        # add heat map
-        self.figure.add_trace(
-        go.Scatter(x=heat_positions[:, 0],
-                   y=heat_positions[:, 1],
-                   mode='markers',
-                   marker=dict(size=7,
-                               color=heat_values,
-                               colorbar=dict(title=colorbar_title),
-                               colorscale="Rainbow"),
-                   text=heat_values,
-                   name=colorbar_title))
+    def plot_wifi_heatmap(self, preprocess = False, colorbar_title='dBm'):
+        if preprocess:
+            wifi_rssi = self.extract_rssi_compute()
+            ten_wifi_bssids = random.sample(wifi_rssi.keys(), 10)
+            print('Example 10 wifi ap bssids:\n')
+            for bssid in ten_wifi_bssids:
+                print(bssid)
+            target_wifi = input(f"Please input target wifi ap bssid:\n")
+            heat_positions = np.array(list(wifi_rssi[target_wifi].keys()))
+            print(len(heat_positions))
+            heat_values = np.array(list(wifi_rssi[target_wifi].values()))[:, 0]
+            # add heat map
+            self.figure.add_trace(
+            go.Scatter(x=heat_positions[:, 0],
+                    y=heat_positions[:, 1],
+                    mode='markers',
+                    marker=dict(size=7,
+                                color=heat_values,
+                                colorbar=dict(title=colorbar_title),
+                                colorscale="Rainbow"),
+                    text=heat_values,
+                    name=colorbar_title))
+        else:
+            wifi_rssi = self.extract_rssi()
+            ten_wifi_bssids = random.sample(wifi_rssi.keys(), 10)
+            print('Example 10 wifi ap bssids:\n')
+            for bssid in ten_wifi_bssids:
+                print(bssid)
+            target_wifi = input(f"Please input target wifi ap bssid:\n")
+            wifi_rssi = np.array(wifi_rssi[target_wifi])
+            print(len(wifi_rssi))
+            self.figure.add_trace(
+            go.Scatter(x=wifi_rssi[:, 0],
+                    y=wifi_rssi[:, 1],
+                    mode='markers',
+                    marker=dict(size=7,
+                                color=wifi_rssi[:,2],
+                                colorbar=dict(title=colorbar_title),
+                                colorscale="Rainbow"),
+                    text=wifi_rssi[:,2],
+                    name=colorbar_title))
 
     def extract_rssi(self):
+        wifi = []
+        waypoint = []
+        paths = self.filepaths_by_site_and_floor(int(self.site[-1]), self.floor)
+        datafiles = [DataFile(path) for path in paths]
+        for file in datafiles:
+            file.load()
+            data = file.parse()
+            for w in data.wifi:
+                wifi.append(w)
+            for wa in data.waypoint:
+                waypoint.append(wa)
+
+        wifi = np.array(wifi)
+        waypoint = np.array(waypoint)
+
+        index_data = [{'wifi':defaultdict(list)} for _ in range(len(waypoint))]
+        index_time = waypoint[:,0]
+        for wifi_data in wifi:
+            tdiff = abs(index_time - int(wifi_data[0]))
+            i = np.argmin(tdiff)
+            index_data[i]['wifi'][wifi_data[2]].append(int(wifi_data[3]))
+        wifi_rssi = [None] * len(waypoint)
+        for index in range(len(index_time)):
+            t, Px, Py = waypoint[index]
+            wifi_rssi[index] = [t,Px,Py]
+            wifis = index_data[index]['wifi']
+
+            wifi_rssi[index].append(defaultdict(lambda: -100))
+            for bssid, rssis in wifis.items():
+                wifi_rssi[index][-1][bssid] = sum(rssis)/len(rssis)
+
+        wifi_data = defaultdict(list)
+        for tdata in wifi_rssi:
+            px, py = tdata[1], tdata[2]
+            timestamp_wifis = tdata[3]
+            for bssid, rssi in timestamp_wifis.items():
+                wifi_data[bssid].append((px, py, rssi))
+
+        return wifi_data    
+
+
+    def extract_rssi_compute(self):
         wifi_vir_datas = {}
         paths = self.filepaths_by_site_and_floor(int(self.site[-1]), self.floor)
         datafiles = [DataFile(path) for path in paths]

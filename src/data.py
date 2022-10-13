@@ -255,7 +255,7 @@ class FloorPlan(RootDirectory):
             self.load_data()
         
 
-    def show(self):
+    def show(self, display: bool = True):
         # add floor plan        
         title = 'Floor plan for {site} {floor}'.format(site=self.site, floor=self.floor)
         if not self.info:
@@ -291,16 +291,24 @@ class FloorPlan(RootDirectory):
             template="plotly_white"
         )
         
-        self.figure.show()
+        if display:
+            self.figure.show()
     
-    def plot_trajectory(self, mode='lines + markers + text'):
+    def plot_trajectory(self, mode='lines + markers + text', augment_data: bool = False):
         # fig = go.Figure()
         paths = self.filepaths_by_site_and_floor(int(self.site[-1]), self.floor)
         datafiles = [DataFile(path) for path in paths]
         for file in datafiles:
             file.load()
             data = file.parse()
-            trajectory = data.waypoint[:, 1:3]
+            if augment_data:
+                augmented_data = Compute().compute_step_positions(data.acce, data.ahrs, data.waypoint) # computing steps using sample codes
+            else:
+                augmented_data = data.waypoint
+
+
+            #augmented_data = Compute().compute_step_positions(self.data.acce, self.data.ahrs, self.data.waypoint) # computing steps using sample codes
+            trajectory = augmented_data[:, 1:3]
     
             # add trajectory
             size_list = [6] * trajectory.shape[0]

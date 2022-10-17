@@ -258,7 +258,7 @@ class FingerprintModel(object):
               print(f'Early stopping at Epoch {epoch}')
               break
 
-        return np.min(self.loss_error[2]), np.argmin(self.loss_error[2])+1
+        return np.min(self.loss_error[2]), np.argmin(self.loss_error[2])+1, self.loss_error
 
 
 

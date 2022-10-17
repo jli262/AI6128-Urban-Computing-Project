@@ -294,6 +294,34 @@ class FloorPlan(RootDirectory):
         if display:
             self.figure.show()
     
+    def describe_waypoints(self, augment_data: bool = False):
+        paths = self.filepaths_by_site_and_floor(int(self.site[-1]), self.floor)
+        datafiles = [DataFile(path) for path in paths]
+        output = {}
+        unique_count = dict()
+        total_count = 0
+        for file in datafiles:
+            file.load()
+            data = file.parse()
+            if augment_data:
+                augmented_data = Compute().compute_step_positions(data.acce, data.ahrs, data.waypoint) # computing steps using sample codes
+            else:
+                augmented_data = data.waypoint
+             
+            trajectory = augmented_data[:, 1:3]
+            trajectory = trajectory.astype(str)
+            unique = ['_'.join(row) for row in trajectory]
+            for uid in unique:
+                if uid in unique_count:
+                    unique_count[uid] += 1
+                else:
+                    unique_count[uid] = 1
+            
+            total_count += trajectory.shape[0]
+        
+        return str(len(unique_count)), str(total_count), str(total_count/len(datafiles)), str(len(datafiles))
+
+
     def plot_trajectory(self, mode='lines + markers + text', augment_data: bool = False):
         # fig = go.Figure()
         paths = self.filepaths_by_site_and_floor(int(self.site[-1]), self.floor)

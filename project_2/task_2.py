@@ -17,8 +17,10 @@ if __name__ == '__main__':
     road_network = RoadNetwork()
     road_network.from_polygon(jsonpath)
     road_network.plot_graph()
-
+    
     first_ten = trips.trips[:10]
+    road_network.to_shapefile_directional(output_directory)
+    
     i = 1
     colors = list(mcolors.TABLEAU_COLORS.keys())
     for trip in first_ten:

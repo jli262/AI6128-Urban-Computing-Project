@@ -6,10 +6,13 @@ from src.data import Trips, RoadNetwork
 import matplotlib.colors as mcolors
 import osmnx
 import folium
+import json
+
+from shapely.geometry import shape
 
 if __name__ == '__main__':
     datapath = os.path.join(os.path.join(os.getcwd(), 'data'), 'train_1000.csv')
-    jsonpath = os.path.join(os.path.join(os.getcwd(), 'data'), 'porto.geojson')
+    jsonpath = os.path.join(os.path.join(os.getcwd(), 'data'), 'porto_boundary.geojson')
     output_directory = os.path.join(os.getcwd(), 'output')
     trips = Trips(datapath)
     trips.load()
@@ -17,9 +20,10 @@ if __name__ == '__main__':
     road_network = RoadNetwork()
     road_network.from_polygon(jsonpath)
     road_network.plot_graph()
+    road_network.to_shapefile_directional(output_directory)
     
     first_ten = trips.trips[:10]
-    road_network.to_shapefile_directional(output_directory)
+    
     
     i = 1
     colors = list(mcolors.TABLEAU_COLORS.keys())

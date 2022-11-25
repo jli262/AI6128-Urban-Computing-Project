@@ -88,7 +88,7 @@ class RoadNetwork(object):
         gdf_edges = ox.io._stringify_nonnumeric_cols(gdf_edges)
 
         # We need an unique ID for each edge
-        gdf_edges["fid"] = gdf_edges.index.map('{0[0]}_{0[1]}'.format)
+        gdf_edges["fid"] = np.arange(gdf_edges.shape[0])
         
         # save the nodes and edges as separate ESRI shapefiles
         gdf_nodes.to_file(filepath_nodes, encoding=encoding)

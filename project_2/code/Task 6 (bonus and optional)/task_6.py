@@ -17,7 +17,7 @@ def set_threshold():
     threshold_max = 0.02
     threshold_step = 0.002
 
-train_1000 = pd.read_csv('data/train_1000.csv')
+train_1000 = pd.read_csv('../train_1000.csv')
 consecutive_dis = []
 
 
@@ -70,4 +70,4 @@ for n in range(1000):
             calculateThreshold()
         train_1000['POLYLINE'][n] = convertList(improved_ps)
 
-train_1000.to_csv('data/improved_train_1000.csv',index=0)
+train_1000.to_csv('../improved_train_1000.csv',index=0)
